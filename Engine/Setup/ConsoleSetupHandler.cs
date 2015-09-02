@@ -21,9 +21,12 @@ using QuantConnect.AlgorithmFactory;
 using QuantConnect.Brokerages.Backtesting;
 using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
+using QuantConnect.Lean.Engine.RealTime;
 using QuantConnect.Lean.Engine.Results;
+using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Logging;
 using QuantConnect.Packets;
+using QuantConnect.Securities;
 
 namespace QuantConnect.Lean.Engine.Setup
 {
@@ -74,8 +77,9 @@ namespace QuantConnect.Lean.Engine.Setup
         /// force it to find that one
         /// </summary>
         /// <param name="assemblyPath">Physical path of the algorithm dll.</param>
+        /// <param name="language">Language of the assembly.</param>
         /// <returns>Algorithm instance</returns>
-        public IAlgorithm CreateAlgorithmInstance(string assemblyPath)
+        public IAlgorithm CreateAlgorithmInstance(string assemblyPath, Language language)
         {
             string error;
             IAlgorithm algorithm;
@@ -83,7 +87,7 @@ namespace QuantConnect.Lean.Engine.Setup
 
             // don't force load times to be fast here since we're running locally, this allows us to debug
             // and step through some code that may take us longer than the default 10 seconds
-            var loader = new Loader(TimeSpan.FromHours(1), names => names.Single(name => MatchTypeName(name, algorithmName)));
+            var loader = new Loader(language, TimeSpan.FromHours(1), names => names.Single(name => MatchTypeName(name, algorithmName)));
             var complete = loader.TryCreateAlgorithmInstanceWithIsolator(assemblyPath, out algorithm, out error);
             if (!complete) throw new Exception(error + ": try re-building algorithm.");
 
@@ -96,9 +100,11 @@ namespace QuantConnect.Lean.Engine.Setup
         /// <param name="algorithm">Existing algorithm instance</param>
         /// <param name="brokerage">New brokerage instance</param>
         /// <param name="baseJob">Backtesting job</param>
-        /// <param name="resultHandler"></param>
+        /// <param name="resultHandler">The configured result handler</param>
+        /// <param name="transactionHandler">The configuration transaction handler</param>
+        /// <param name="realTimeHandler">The configured real time handler</param>
         /// <returns>Boolean true on successfully setting up the console.</returns>
-        public bool Setup(IAlgorithm algorithm, out IBrokerage brokerage, AlgorithmNodePacket baseJob, IResultHandler resultHandler)
+        public bool Setup(IAlgorithm algorithm, out IBrokerage brokerage, AlgorithmNodePacket baseJob, IResultHandler resultHandler, ITransactionHandler transactionHandler, IRealTimeHandler realTimeHandler)
         {
             var initializeComplete = false;
 
@@ -113,11 +119,14 @@ namespace QuantConnect.Lean.Engine.Setup
                     //Set the limits on the algorithm assets (for local no limits)
                     algorithm.SetAssetLimits(999, 999, 999);
                     algorithm.SetMaximumOrders(int.MaxValue);
-
+                    //Set the source impl for the event scheduling
+                    algorithm.Schedule.SetEventSchedule(realTimeHandler);
                     //Setup Base Algorithm:
                     algorithm.Initialize();
+                    //Set the time frontier of the algorithm
+                    algorithm.SetDateTime(algorithm.StartDate.ConvertToUtc(algorithm.TimeZone));
                     //Add currency data feeds that weren't explicity added in Initialize
-                    algorithm.Portfolio.CashBook.EnsureCurrencyDataFeeds(algorithm.Securities, algorithm.SubscriptionManager);
+                    algorithm.Portfolio.CashBook.EnsureCurrencyDataFeeds(algorithm.Securities, algorithm.SubscriptionManager, SecurityExchangeHoursProvider.FromDataFolder());
 
                     //Construct the backtest job packet:
                     backtestJob.PeriodStart = algorithm.StartDate;
@@ -151,6 +160,8 @@ namespace QuantConnect.Lean.Engine.Setup
 
             // set the transaction models base on the requested brokerage properties
             SetupHandler.UpdateTransactionModels(algorithm, algorithm.BrokerageModel);
+            algorithm.Transactions.SetOrderProcessor(transactionHandler);
+            algorithm.PostInitialize();
 
             return initializeComplete;
         }

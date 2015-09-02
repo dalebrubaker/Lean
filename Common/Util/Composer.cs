@@ -18,8 +18,13 @@ using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.ComponentModel.Composition.Hosting;
+using System.ComponentModel.Composition.Primitives;
 using System.ComponentModel.Composition.ReflectionModel;
+using System.IO;
 using System.Linq;
+using System.Reflection;
+using QuantConnect.Configuration;
+using QuantConnect.Logging;
 
 namespace QuantConnect.Util
 {
@@ -28,6 +33,8 @@ namespace QuantConnect.Util
     /// </summary>
     public class Composer
     {
+        private static readonly string PluginDirectory = Config.Get("plugin-directory");
+
         /// <summary>
         /// Gets the singleton instance
         /// </summary>
@@ -62,6 +69,28 @@ namespace QuantConnect.Util
         }
 
         /// <summary>
+        /// Adds the specified instance to this instance to allow it to be recalled via GetExportedValueByTypeName
+        /// </summary>
+        /// <typeparam name="T">The contract type</typeparam>
+        /// <param name="instance">The instance to add</param>
+        public void AddPart<T>(T instance)
+        {
+            lock (_exportedValuesLockObject)
+            {
+                IEnumerable values;
+                if (_exportedValues.TryGetValue(typeof (T), out values))
+                {
+                    ((IList<T>) values).Add(instance);
+                }
+                else
+                {
+                    values = new List<T> {instance};
+                    _exportedValues[typeof (T)] = values;
+                }
+            }
+        }
+
+        /// <summary>
         /// Extension method to searches the composition container for an export that has a matching type name. This function
         /// will first try to match on Type.AssemblyQualifiedName, then Type.FullName, and finally on Type.Name
         /// 
@@ -73,49 +102,67 @@ namespace QuantConnect.Util
         public T GetExportedValueByTypeName<T>(string typeName)
             where T : class
         {
-            lock (_exportedValuesLockObject)
+            try
             {
-                T instance;
-                IEnumerable values;
-                var type = typeof (T);
-                if (_exportedValues.TryGetValue(type, out values))
+                lock (_exportedValuesLockObject)
                 {
-                    // if we've alread loaded this part, then just reserve the same one
-                    instance = values.OfType<T>().FirstOrDefault(x => x.GetType().MatchesTypeName(typeName));
-                    if (instance != null)
+                    T instance;
+                    IEnumerable values;
+                    var type = typeof(T);
+                    if (_exportedValues.TryGetValue(type, out values))
                     {
-                        return instance;
+                        // if we've alread loaded this part, then just reserve the same one
+                        instance = values.OfType<T>().FirstOrDefault(x => x.GetType().MatchesTypeName(typeName));
+                        if (instance != null)
+                        {
+                            return instance;
+                        }
                     }
+
+                    // we want to get the requested part without instantiating each one of that type
+                    var selectedPart = _compositionContainer.Catalog.Parts
+                        .Select(x => new { part = x, Type = ReflectionModelServices.GetPartType(x).Value })
+                        .Where(x => type.IsAssignableFrom(x.Type))
+                        .Where(x => x.Type.MatchesTypeName(typeName))
+                        .Select(x => x.part)
+                        .FirstOrDefault();
+
+                    if (selectedPart == null)
+                    {
+                        throw new ArgumentException(
+                            "Unable to locate any exports matching the requested typeName: " + typeName, "typeName");
+                    }
+
+                    var exportDefinition =
+                        selectedPart.ExportDefinitions.First(
+                            x => x.ContractName == AttributedModelServices.GetContractName(type));
+                    instance = (T)selectedPart.CreatePart().GetExportedValue(exportDefinition);
+
+                    // cache the new value for next time
+                    if (values == null)
+                    {
+                        values = new List<T> { instance };
+                        _exportedValues[type] = values;
+                    }
+                    else
+                    {
+                        ((List<T>)values).Add(instance);
+                    }
+
+                    return instance;
                 }
-
-                // we want to get the requested part without instantiating each one of that type
-                var selectedPart = _compositionContainer.Catalog.Parts
-                    .Select(x => new {part = x, Type = ReflectionModelServices.GetPartType(x).Value})
-                    .Where(x => type.IsAssignableFrom(x.Type))
-                    .Where(x => x.Type.MatchesTypeName(typeName))
-                    .Select(x => x.part)
-                    .FirstOrDefault();
-
-                if (selectedPart == null)
+            } 
+            catch (ReflectionTypeLoadException err) 
+            {
+                foreach (var exception in err.LoaderExceptions)
                 {
-                    throw new ArgumentException("Unable to locate any exports matching the requested typeName: " + typeName, "typeName");
+                    Log.Error(exception);
+                    Log.Error(exception.ToString());
                 }
 
-                var exportDefinition = selectedPart.ExportDefinitions.First(x => x.ContractName == AttributedModelServices.GetContractName(type));
-                instance = (T) selectedPart.CreatePart().GetExportedValue(exportDefinition);
+                if (err.InnerException != null) Log.Error(err.InnerException);
 
-                // cache the new value for next time
-                if (values == null)
-                {
-                    values = new List<T> {instance};
-                    _exportedValues[type] = values;
-                }
-                else
-                {
-                    ((List<T>) values).Add(instance);
-                }
-
-                return instance;
+                throw;
             }
         }
         /// <summary>
@@ -145,9 +192,16 @@ namespace QuantConnect.Util
             lock(_exportedValuesLockObject)
             {
                 // grab assemblies from current executing directory
-                var dllCatalog = new DirectoryCatalog(AppDomain.CurrentDomain.BaseDirectory, "*.dll");
-                var exeCatalog = new DirectoryCatalog(AppDomain.CurrentDomain.BaseDirectory, "*.exe");
-                var aggregate = new AggregateCatalog(dllCatalog, exeCatalog);
+                var catalogs = new List<ComposablePartCatalog>
+                {
+                    new DirectoryCatalog(AppDomain.CurrentDomain.BaseDirectory, "*.dll"),
+                    new DirectoryCatalog(AppDomain.CurrentDomain.BaseDirectory, "*.exe")
+                };
+                if (!string.IsNullOrWhiteSpace(PluginDirectory) && Directory.Exists(PluginDirectory) && new DirectoryInfo(PluginDirectory).FullName != AppDomain.CurrentDomain.BaseDirectory)
+                {
+                    catalogs.Add(new DirectoryCatalog(PluginDirectory, "*.dll"));
+                }
+                var aggregate = new AggregateCatalog(catalogs);
                 _compositionContainer = new CompositionContainer(aggregate);
                 _exportedValues.Clear();
             }

@@ -21,6 +21,7 @@ using System.ComponentModel.Composition;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Lean.Engine.Setup;
+using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
 
@@ -86,7 +87,8 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="api"></param>
         /// <param name="dataFeed"></param>
         /// <param name="setupHandler"></param>
-        void Initialize(AlgorithmNodePacket job, IMessagingHandler messagingHandler, IApi api, IDataFeed dataFeed, ISetupHandler setupHandler);
+        /// <param name="transactionHandler"></param>
+        void Initialize(AlgorithmNodePacket job, IMessagingHandler messagingHandler, IApi api, IDataFeed dataFeed, ISetupHandler setupHandler, ITransactionHandler transactionHandler);
 
         /// <summary>
         /// Primary result thread entry point to process the result message queue and send it to whatever endpoint is set.
@@ -154,6 +156,14 @@ namespace QuantConnect.Lean.Engine.Results
         /// <seealso cref="Sample(string,ChartType,string,SeriesType,DateTime,decimal,string)"/>
         void SamplePerformance(DateTime time, decimal value);
 
+        /// <summary>
+        /// Sample the current benchmark performance directly with a time-value pair.
+        /// </summary>
+        /// <param name="time">Current backtest date.</param>
+        /// <param name="value">Current benchmark value.</param>
+        /// <seealso cref="Sample(string,ChartType,string,SeriesType,DateTime,decimal,string)"/>
+        void SampleBenchmark(DateTime time, decimal value);
+        
         /// <summary>
         /// Sample the asset prices to generate plots.
         /// </summary>

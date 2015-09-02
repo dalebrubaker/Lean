@@ -25,7 +25,6 @@ namespace QuantConnect.Algorithm
 {
     public partial class QCAlgorithm
     {
-        private bool _processingOrder = false;
         private int _maxOrders = 10000;
 
         /// <summary>
@@ -34,29 +33,12 @@ namespace QuantConnect.Algorithm
         public SecurityTransactionManager Transactions { get; set; }
 
         /// <summary>
-        /// Wait semaphore to signal the algoritm is currently processing a synchronous order.
-        /// </summary>
-        public bool ProcessingOrder
-        {
-            get { return _processingOrder; }
-            set { _processingOrder = value; }
-        }
-
-        /// <summary>
-        /// Accessor for filled orders dictionary
-        /// </summary>
-        public ConcurrentDictionary<int, Order> Orders
-        {
-            get { return Transactions.Orders; }
-        }
-
-        /// <summary>
         /// Buy Stock (Alias of Order)
         /// </summary>
         /// <param name="symbol">string Symbol of the asset to trade</param>
         /// <param name="quantity">int Quantity of the asset to trade</param>
         /// <seealso cref="Buy(string, double)"/>
-        public int Buy(string symbol, int quantity)
+        public OrderTicket Buy(string symbol, int quantity)
         {
             return Order(symbol, Math.Abs(quantity));
         }
@@ -67,7 +49,7 @@ namespace QuantConnect.Algorithm
         /// <param name="symbol">string Symbol of the asset to trade</param>
         /// <param name="quantity">double Quantity of the asset to trade</param>
         /// <seealso cref="Buy(string, int)"/>
-        public int Buy(string symbol, double quantity)
+        public OrderTicket Buy(string symbol, double quantity)
         {
             return Order(symbol, Math.Abs(quantity));
         }
@@ -78,7 +60,7 @@ namespace QuantConnect.Algorithm
         /// <param name="symbol">string Symbol of the asset to trade</param>
         /// <param name="quantity">decimal Quantity of the asset to trade</param>
         /// <seealso cref="Order(string, double)"/>
-        public int Buy(string symbol, decimal quantity)
+        public OrderTicket Buy(string symbol, decimal quantity)
         {
             return Order(symbol, Math.Abs(quantity));
         }
@@ -89,7 +71,7 @@ namespace QuantConnect.Algorithm
         /// <param name="symbol">string Symbol of the asset to trade</param>
         /// <param name="quantity">float Quantity of the asset to trade</param>
         /// <seealso cref="Buy(string, double)"/>
-        public int Buy(string symbol, float quantity)
+        public OrderTicket Buy(string symbol, float quantity)
         {
             return Order(symbol, Math.Abs(quantity));
         }
@@ -100,7 +82,7 @@ namespace QuantConnect.Algorithm
         /// <param name="symbol">string Symbol of the asset to trade</param>
         /// <param name="quantity">int Quantity of the asset to trade</param>
         /// <seealso cref="Sell(string, double)"/>
-        public int Sell(string symbol, int quantity)
+        public OrderTicket Sell(string symbol, int quantity)
         {
             return Order(symbol, Math.Abs(quantity) * -1);
         }
@@ -111,7 +93,7 @@ namespace QuantConnect.Algorithm
         /// <param name="symbol">String symbol to sell</param>
         /// <param name="quantity">Quantity to order</param>
         /// <returns>int Order Id.</returns>
-        public int Sell(string symbol, double quantity)
+        public OrderTicket Sell(string symbol, double quantity)
         {
             return Order(symbol, Math.Abs(quantity) * -1);
         }
@@ -123,7 +105,7 @@ namespace QuantConnect.Algorithm
         /// <param name="quantity">Quantity to sell</param>
         /// <returns>int order id</returns>
         /// <seealso cref="Sell(string, double)"/>
-        public int Sell(string symbol, float quantity)
+        public OrderTicket Sell(string symbol, float quantity)
         {
             return Order(symbol, Math.Abs(quantity) * -1);
         }
@@ -134,7 +116,7 @@ namespace QuantConnect.Algorithm
         /// <param name="symbol">String symbol to sell</param>
         /// <param name="quantity">Quantity to sell</param>
         /// <returns>Int Order Id.</returns>
-        public int Sell(string symbol, decimal quantity)
+        public OrderTicket Sell(string symbol, decimal quantity)
         {
             return Order(symbol, Math.Abs(quantity) * -1);
         }
@@ -143,7 +125,7 @@ namespace QuantConnect.Algorithm
         /// Issue an order/trade for asset: Alias wrapper for Order(string, int);
         /// </summary>
         /// <seealso cref="Order(string, double)"/>
-        public int Order(string symbol, double quantity)
+        public OrderTicket Order(string symbol, double quantity)
         {
             return Order(symbol, (int) quantity);
         }
@@ -153,7 +135,7 @@ namespace QuantConnect.Algorithm
         /// </summary>
         /// <remarks></remarks>
         /// <seealso cref="Order(string, double)"/>
-        public int Order(string symbol, decimal quantity)
+        public OrderTicket Order(string symbol, decimal quantity)
         {
             return Order(symbol, (int) quantity);
         }
@@ -166,7 +148,7 @@ namespace QuantConnect.Algorithm
         /// <param name="asynchronous">Send the order asynchrously (false). Otherwise we'll block until it fills</param>
         /// <param name="tag">Place a custom order property or tag (e.g. indicator data).</param>
         /// <seealso cref="MarketOrder(string, int, bool, string)"/>
-        public int Order(string symbol, int quantity, bool asynchronous = false, string tag = "")
+        public OrderTicket Order(string symbol, int quantity, bool asynchronous = false, string tag = "")
         {
             return MarketOrder(symbol, quantity, asynchronous, tag);
         }
@@ -179,7 +161,7 @@ namespace QuantConnect.Algorithm
         /// <param name="asynchronous">Send the order asynchrously (false). Otherwise we'll block until it fills</param>
         /// <param name="tag">Place a custom order property or tag (e.g. indicator data).</param>
         /// <returns>int Order id</returns>
-        public int MarketOrder(string symbol, int quantity, bool asynchronous = false, string tag = "")
+        public OrderTicket MarketOrder(string symbol, int quantity, bool asynchronous = false, string tag = "")
         {
             var security = Securities[symbol];
 
@@ -187,41 +169,33 @@ namespace QuantConnect.Algorithm
             // then convert it into a market on open order
             if (!security.Exchange.ExchangeOpen)
             {
-                var id = MarketOnOpenOrder(symbol, quantity, tag);
-                Debug("Converted OrderID: " + id + " into a MarketOnOpen order.");
-                return id;
+                var mooTicket = MarketOnOpenOrder(symbol, quantity, tag);
+                if (mooTicket.SubmitRequest.Response.IsSuccess && security.SubscriptionDataConfig.Resolution != Resolution.Daily)
+                {
+                    Debug("Converted OrderID: " + mooTicket.OrderId + " into a MarketOnOpen order.");
+                }   
+                return mooTicket;
             }
+
+            var request = CreateSubmitOrderRequest(OrderType.Market, security, quantity, tag);
 
             //Initalize the Market order parameters:
-            var error = PreOrderChecks(symbol, quantity, OrderType.Market);
-            if (error < 0)
+            var preOrderCheckResponse = PreOrderChecks(request);
+            if (preOrderCheckResponse.IsError)
             {
-                return error;
+                return OrderTicket.InvalidSubmitRequest(Transactions, request, preOrderCheckResponse);
             }
 
-            var order = new MarketOrder(symbol, quantity, Time, tag, security.Type);
-
-            //Set the rough price of the order for buying power calculations
-            order.Price = security.Price;
-
             //Add the order and create a new order Id.
-            var orderId = Transactions.AddOrder(order);
+            var ticket = Transactions.AddOrder(request);
 
             //Wait for the order event to process, only if the exchange is open
             if (!asynchronous)
             {
-                //Wait for the market order to fill.
-                //This is processed in a parallel thread.
-                while (!Transactions.Orders.ContainsKey(orderId) ||
-                       (Transactions.Orders[orderId].Status != OrderStatus.Filled &&
-                        Transactions.Orders[orderId].Status != OrderStatus.Invalid &&
-                        Transactions.Orders[orderId].Status != OrderStatus.Canceled) || _processingOrder)
-                {
-                    Thread.Sleep(1);
-                }
+                Transactions.WaitForOrder(ticket.OrderId);
             }
 
-            return orderId;
+            return ticket;
         }
 
         /// <summary>
@@ -231,18 +205,17 @@ namespace QuantConnect.Algorithm
         /// <param name="quantity">The number of shares to required</param>
         /// <param name="tag">Place a custom order property or tag (e.g. indicator data).</param>
         /// <returns>The order ID</returns>
-        public int MarketOnOpenOrder(string symbol, int quantity, string tag = "")
+        public OrderTicket MarketOnOpenOrder(string symbol, int quantity, string tag = "")
         {
-            var error = PreOrderChecks(symbol, quantity, OrderType.MarketOnOpen);
-            if (error < 0)
+            var security = Securities[symbol];
+            var request = CreateSubmitOrderRequest(OrderType.MarketOnOpen, security, quantity, tag);
+            var response = PreOrderChecks(request);
+            if (response.IsError)
             {
-                return error;
+                return OrderTicket.InvalidSubmitRequest(Transactions, request, response);
             }
 
-            var security = Securities[symbol];
-            var order = new MarketOnOpenOrder(symbol, security.Type, quantity, Time, security.Price, tag);
-
-            return Transactions.AddOrder(order);
+            return Transactions.AddOrder(request);
         }
 
         /// <summary>
@@ -252,18 +225,17 @@ namespace QuantConnect.Algorithm
         /// <param name="quantity">The number of shares to required</param>
         /// <param name="tag">Place a custom order property or tag (e.g. indicator data).</param>
         /// <returns>The order ID</returns>
-        public int MarketOnCloseOrder(string symbol, int quantity, string tag = "")
+        public OrderTicket MarketOnCloseOrder(string symbol, int quantity, string tag = "")
         {
-            var error = PreOrderChecks(symbol, quantity, OrderType.MarketOnClose);
-            if (error < 0)
+            var security = Securities[symbol];
+            var request = CreateSubmitOrderRequest(OrderType.MarketOnClose, security, quantity, tag);
+            var response = PreOrderChecks(request);
+            if (response.IsError)
             {
-                return error;
+                return OrderTicket.InvalidSubmitRequest(Transactions, request, response);
             }
 
-            var security = Securities[symbol];
-            var order = new MarketOnCloseOrder(symbol, security.Type, quantity, Time, security.Price, tag);
-
-            return Transactions.AddOrder(order);
+            return Transactions.AddOrder(request);
         }
 
         /// <summary>
@@ -274,18 +246,17 @@ namespace QuantConnect.Algorithm
         /// <param name="limitPrice">Limit price to fill this order</param>
         /// <param name="tag">String tag for the order (optional)</param>
         /// <returns>Order id</returns>
-        public int LimitOrder(string symbol, int quantity, decimal limitPrice, string tag = "")
+        public OrderTicket LimitOrder(string symbol, int quantity, decimal limitPrice, string tag = "")
         {
-            var error = PreOrderChecks(symbol, quantity, OrderType.Limit);
-            if (error < 0)
+            var security = Securities[symbol];
+            var request = CreateSubmitOrderRequest(OrderType.Limit, security, quantity, tag, limitPrice: limitPrice);
+            var response = PreOrderChecks(request);
+            if (response.IsError)
             {
-                return error;
+                return OrderTicket.InvalidSubmitRequest(Transactions, request, response);
             }
 
-            var order = new LimitOrder(symbol, quantity, limitPrice, Time, tag, Securities[symbol].Type);
-
-            //Add the order and create a new order Id.
-            return Transactions.AddOrder(order);
+            return Transactions.AddOrder(request);
         }
 
         /// <summary>
@@ -296,18 +267,17 @@ namespace QuantConnect.Algorithm
         /// <param name="stopPrice">Price to fill the stop order</param>
         /// <param name="tag">Optional string data tag for the order</param>
         /// <returns>Int orderId for the new order.</returns>
-        public int StopMarketOrder(string symbol, int quantity, decimal stopPrice, string tag = "")
+        public OrderTicket StopMarketOrder(string symbol, int quantity, decimal stopPrice, string tag = "")
         {
-            var error = PreOrderChecks(symbol, quantity, OrderType.StopMarket);
-            if (error < 0)
+            var security = Securities[symbol];
+            var request = CreateSubmitOrderRequest(OrderType.StopMarket, security, quantity, tag, stopPrice: stopPrice);
+            var response = PreOrderChecks(request);
+            if (response.IsError)
             {
-                return error;
+                return OrderTicket.InvalidSubmitRequest(Transactions, request, response);
             }
 
-            var order = new StopMarketOrder(symbol, quantity, stopPrice, Time, tag, Securities[symbol].Type);
-
-            //Add the order and create a new order Id.
-            return Transactions.AddOrder(order);
+            return Transactions.AddOrder(request);
         }
 
         /// <summary>
@@ -319,99 +289,104 @@ namespace QuantConnect.Algorithm
         /// <param name="limitPrice">Limit price to fill this order</param>
         /// <param name="tag">String tag for the order (optional)</param>
         /// <returns>Order id</returns>
-        public int StopLimitOrder(string symbol, int quantity, decimal stopPrice, decimal limitPrice, string tag = "")
+        public OrderTicket StopLimitOrder(string symbol, int quantity, decimal stopPrice, decimal limitPrice, string tag = "")
         {
-            var error = PreOrderChecks(symbol, quantity, OrderType.StopLimit);
-            if (error < 0)
+            var security = Securities[symbol];
+            var request = CreateSubmitOrderRequest(OrderType.StopLimit, security, quantity, tag, stopPrice: stopPrice, limitPrice: limitPrice);
+            var response = PreOrderChecks(request);
+            if (response.IsError)
             {
-                return error;
+                return OrderTicket.InvalidSubmitRequest(Transactions, request, response);
             }
 
-            var order = new StopLimitOrder(symbol, quantity, stopPrice, limitPrice, Time, tag, Securities[symbol].Type);
-
             //Add the order and create a new order Id.
-            return Transactions.AddOrder(order);
+            return Transactions.AddOrder(request);
         }
 
         /// <summary>
         /// Perform preorder checks to ensure we have sufficient capital, 
         /// the market is open, and we haven't exceeded maximum realistic orders per day.
         /// </summary>
-        /// <returns>Negative order errors or zero for pass.</returns>
-        private int PreOrderChecks(string symbol, int quantity, OrderType type)
+        /// <returns>OrderResponse. If no error, order request is submitted.</returns>
+        private OrderResponse PreOrderChecks(SubmitOrderRequest request)
+        {
+            var response = PreOrderChecksImpl(request);
+            if (response.IsError)
+            {
+                Error(response.ErrorMessage);
+            }
+            return response;
+        }
+
+        /// <summary>
+        /// Perform preorder checks to ensure we have sufficient capital, 
+        /// the market is open, and we haven't exceeded maximum realistic orders per day.
+        /// </summary>
+        /// <returns>OrderResponse. If no error, order request is submitted.</returns>
+        private OrderResponse PreOrderChecksImpl(SubmitOrderRequest request)
         {
             //Ordering 0 is useless.
-            if (quantity == 0 || string.IsNullOrEmpty(symbol))
+            if (request.Quantity == 0 || string.IsNullOrEmpty(request.Symbol))
             {
-                return -1;
+                return OrderResponse.ZeroQuantity(request);
             }
 
-            //Internals use upper case symbols.
-            symbol = symbol.ToUpper();
-
             //If we're not tracking this symbol: throw error:
-            if (!Securities.ContainsKey(symbol) && !_sentNoDataError)
+            if (!Securities.ContainsKey(request.Symbol) && !_sentNoDataError)
             {
                 _sentNoDataError = true;
-                Error("You haven't requested " + symbol + " data. Add this with AddSecurity() in the Initialize() Method.");
-                return -1;
+                return OrderResponse.Error(request, OrderResponseErrorCode.MissingSecurity, "You haven't requested " + request.Symbol + " data. Add this with AddSecurity() in the Initialize() Method.");
             }
 
             //Set a temporary price for validating order for market orders:
-            var security = Securities[symbol];
+            var security = Securities[request.Symbol];
             var price = security.Price;
 
             //Check the exchange is open before sending a market on close orders
             //Allow market orders, they'll just execute when the exchange reopens
-            if (type == OrderType.MarketOnClose && !security.Exchange.ExchangeOpen)
+            if (request.OrderType == OrderType.MarketOnClose && !security.Exchange.ExchangeOpen)
             {
-                Error(type + " order and exchange not open.");
-                return -3;
+                return OrderResponse.Error(request, OrderResponseErrorCode.ExchangeNotOpen, request.OrderType + " order and exchange not open.");
             }
-
+            
             if (price == 0)
             {
-                Error(symbol + ": asset price is $0. If using custom data make sure you've set the 'Value' property.");
-                return -1;
+                return OrderResponse.Error(request, OrderResponseErrorCode.SecurityPriceZero, request.Symbol + ": asset price is $0. If using custom data make sure you've set the 'Value' property.");
             }
-
+            
             if (security.Type == SecurityType.Forex)
             {
                 // for forex pairs we need to verify that the conversions to USD have values as well
                 string baseCurrency, quoteCurrency;
                 Forex.DecomposeCurrencyPair(security.Symbol, out baseCurrency, out quoteCurrency);
-                
+
                 // verify they're in the portfolio
                 Cash baseCash, quoteCash;
                 if (!Portfolio.CashBook.TryGetValue(baseCurrency, out baseCash) || !Portfolio.CashBook.TryGetValue(quoteCurrency, out quoteCash))
                 {
-                    Error(symbol + ": requires " + baseCurrency + " and " + quoteCurrency + " in the cashbook to trade.");
-                    return -1;
+                    return OrderResponse.Error(request, OrderResponseErrorCode.ForexBaseAndQuoteCurrenciesRequired, request.Symbol + ": requires " + baseCurrency + " and " + quoteCurrency + " in the cashbook to trade.");
                 }
                 // verify we have conversion rates for each leg of the pair back into the account currency
                 if (baseCash.ConversionRate == 0m || quoteCash.ConversionRate == 0m)
                 {
-                    Error(symbol + ": requires " + baseCurrency + " and " + quoteCurrency + " to have non-zero conversion rates. This can be caused by lack of data.");
-                    return -1;
+                    return OrderResponse.Error(request, OrderResponseErrorCode.ForexConversionRateZero, request.Symbol + ": requires " + baseCurrency + " and " + quoteCurrency + " to have non-zero conversion rates. This can be caused by lack of data.");
                 }
             }
-
+            
             //Make sure the security has some data:
             if (!security.HasData)
             {
-                Error("There is no data for this symbol yet, please check the security.HasData flag to ensure there is at least one data point.");
-                return -1;
+                return OrderResponse.Error(request, OrderResponseErrorCode.SecurityHasNoData, "There is no data for this symbol yet, please check the security.HasData flag to ensure there is at least one data point.");
             }
-
+            
             //We've already processed too many orders: max 100 per day or the memory usage explodes
-            if (Orders.Count > _maxOrders)
+            if (Transactions.OrdersCount > _maxOrders)
             {
-                Error(string.Format("You have exceeded maximum number of orders ({0}), for unlimited orders upgrade your account.", _maxOrders));
                 _quit = true;
-                return -5;
+                return OrderResponse.Error(request, OrderResponseErrorCode.ExceededMaximumOrders, string.Format("You have exceeded maximum number of orders ({0}), for unlimited orders upgrade your account.", _maxOrders));
             }
-
-            if (type == OrderType.MarketOnClose)
+            
+            if (request.OrderType == OrderType.MarketOnClose)
             {
                 // must be submitted with at least 10 minutes in trading day, add buffer allow order submission
                 var latestSubmissionTime = (Time.Date + security.Exchange.MarketClose).AddMinutes(-10.75);
@@ -420,11 +395,12 @@ namespace QuantConnect.Algorithm
                     // tell the user we require an 11 minute buffer, on minute data in live a user will receive the 3:49->3:50 bar at 3:50,
                     // this is already too late to submit one of these orders, so make the user do it at the 3:48->3:49 bar so it's submitted
                     // to the brokerage before 3:50.
-                    Error("MarketOnClose orders must be placed with at least a 11 minute buffer before market close.");
-                    return -6;
+                    return OrderResponse.Error(request, OrderResponseErrorCode.MarketOnCloseOrderTooLate, "MarketOnClose orders must be placed with at least a 11 minute buffer before market close.");
                 }
             }
-            return 0;
+
+            // passes all initial order checks
+            return OrderResponse.Success(request);
         }
 
         /// <summary>
@@ -454,7 +430,11 @@ namespace QuantConnect.Algorithm
                 }
 
                 //Liquidate at market price.
-                orderIdList.Add(Order(symbol, quantity));
+                var ticket = Order(symbol, quantity);
+                if (ticket.Status == OrderStatus.Filled)
+                {
+                    orderIdList.Add(ticket.OrderId);
+                }
             }
 
             return orderIdList;
@@ -511,113 +491,116 @@ namespace QuantConnect.Algorithm
         }
 
         /// <summary>
-        /// Automatically place an order which will set the holdings to between 100% or -100% of *Buying Power*.
+        /// Automatically place an order which will set the holdings to between 100% or -100% of *PORTFOLIO VALUE*.
         /// E.g. SetHoldings("AAPL", 0.1); SetHoldings("IBM", -0.2); -> Sets portfolio as long 10% APPL and short 20% IBM
+        /// E.g. SetHoldings("AAPL", 2); -> Sets apple to 2x leveraged with all our cash.
         /// </summary>
-        /// <param name="symbol">   string Symbol indexer</param>
+        /// <param name="symbol">string Symbol indexer</param>
         /// <param name="percentage">decimal fraction of portfolio to set stock</param>
         /// <param name="liquidateExistingHoldings">bool flag to clean all existing holdings before setting new faction.</param>
         /// <param name="tag">Tag the order with a short string.</param>
         /// <seealso cref="MarketOrder"/>
         public void SetHoldings(string symbol, decimal percentage, bool liquidateExistingHoldings = false, string tag = "")
         {
-            //Error checks:
-            if (!Portfolio.ContainsKey(symbol))
+            //Initialize Requirements:
+            Security security;
+            if (!Securities.TryGetValue(symbol, out security))
             {
                 Error(symbol.ToUpper() + " not found in portfolio. Request this data when initializing the algorithm.");
                 return;
             }
-
-            //Range check values:
-            if (percentage > 1) percentage = 1;
-            if (percentage < -1) percentage = -1;
 
             //If they triggered a liquidate
             if (liquidateExistingHoldings)
             {
                 foreach (var holdingSymbol in Portfolio.Keys)
                 {
-                    if (holdingSymbol != symbol && Portfolio[holdingSymbol].AbsoluteQuantity > 0)
+                    if (holdingSymbol != symbol && security.Holdings.AbsoluteQuantity > 0)
                     {
                         //Go through all existing holdings [synchronously], market order the inverse quantity:
-                        Order(holdingSymbol, -Portfolio[holdingSymbol].Quantity);
+                        Order(holdingSymbol, -security.Holdings.Quantity);
                     }
                 }
             }
 
+            //Only place trade if we've got > 1 share to order.
+            var quantity = CalculateOrderQuantity(symbol, percentage);
+            if (Math.Abs(quantity) > 0)
+            {
+                MarketOrder(symbol, quantity, false, tag);
+            }
+        }
+
+        /// <summary>
+        /// Calculate the order quantity to achieve target-percent holdings.
+        /// </summary>
+        /// <param name="symbol">Security object we're asking for</param>
+        /// <param name="target">Target percentag holdings</param>
+        /// <returns>Order quantity to achieve this percentage</returns>
+        public int CalculateOrderQuantity(string symbol, double target)
+        {
+            return CalculateOrderQuantity(symbol, (decimal)target);
+        }
+
+        /// <summary>
+        /// Calculate the order quantity to achieve target-percent holdings.
+        /// </summary>
+        /// <param name="symbol">Security object we're asking for</param>
+        /// <param name="target">Target percentag holdings, this is an unlevered value, so 
+        /// if you have 2x leverage and request 100% holdings, it will utilize half of the 
+        /// available margin</param>
+        /// <returns>Order quantity to achieve this percentage</returns>
+        public int CalculateOrderQuantity(string symbol, decimal target)
+        {
             var security = Securities[symbol];
+            var price = security.Price;
 
-            // compute the remaining margin for this security
-            var direction = percentage > 0 ? OrderDirection.Buy : OrderDirection.Sell;
+            // can't order it if we don't have data
+            if (price == 0) return 0;
 
-            // we need to account for the margin gained if crossing the zero line
-            decimal extraMarginForClosing = 0m;
-            if (security.Holdings.IsLong && direction == OrderDirection.Sell)
+            // this is the value in dollars that we want our holdings to have
+            var targetPortfolioValue = target*Portfolio.TotalPortfolioValue;
+            var quantity = security.Holdings.Quantity;
+            var currentHoldingsValue = price*quantity;
+
+            // remove directionality, we'll work in the land of absolutes
+            var targetOrderValue = Math.Abs(targetPortfolioValue - currentHoldingsValue);
+            var direction = targetPortfolioValue > currentHoldingsValue ? OrderDirection.Buy : OrderDirection.Sell;
+
+
+            // define lower and upper thresholds for the iteration
+            var lowerThreshold = targetOrderValue - price/2;
+            var upperThreshold = targetOrderValue + price/2;
+
+            // continue iterating while  we're still not within the specified thresholds
+            var iterations = 0;
+            var orderQuantity = 0;
+            decimal orderValue = 0;
+            while ((orderValue < lowerThreshold || orderValue > upperThreshold) && iterations < 10)
             {
-                extraMarginForClosing = security.MarginModel.GetMaintenanceMargin(security);
-            }
-            else if (security.Holdings.IsShort && direction == OrderDirection.Buy)
-            {
-                extraMarginForClosing = security.MarginModel.GetMaintenanceMargin(security);
-            }
+                // find delta from where we are to where we want to be
+                var delta = targetOrderValue - orderValue;
+                // use delta value to compute a change in quantity required
+                var deltaQuantity = (int)(delta / price);
 
-            // compute an estimate of the buying power for this security incorporating the implied leverage
-            // we don't want to apply the percentag to the required margin to bring us to zero, so we back out the 'extraMaginForClosing'
-            var marginRemaining = Math.Abs(percentage)*(security.MarginModel.GetMarginRemaining(Portfolio, security, direction) - extraMarginForClosing);
-            marginRemaining += extraMarginForClosing;
+                orderQuantity += deltaQuantity;
 
-            //
-            // Since we can't assume anything about the fee structure and the relative size of fees in
-            // relation to the order size we need to perform some root finding. In general we'll only need
-            // a two loops to compute a correct value. Some exotic fee structures may require more searching.
-            //
+                // recompute order fees
+                var order = new MarketOrder(security.Symbol, orderQuantity, UtcTime, type: security.Type);
+                var fee = security.TransactionModel.GetOrderFee(security, order);
 
-            // compute the margin required for a single share
-            int quantity = 1;
-            var marketOrder = new MarketOrder(symbol, quantity, Time, type: security.Type) { Price = security.Price };
-            var marginRequiredForSingleShare = security.MarginModel.GetInitialMarginRequiredForOrder(security, marketOrder);
+                orderValue = Math.Abs(order.GetValue(price)) + fee;
 
-            // we can't do anything if we don't have data yet
-            if (security.Price == 0) return;
+                // we need to add the fee in as well, even though it's not value, it's still a cost for the transaction
+                // and we need to account for it to be sure we can make the trade produced by this method, imagine
+                // set holdings 100% with 1x leverage, but a high fee structure, it quickly becomes necessary to include
+                // otherwise the result of this function will be inactionable.
 
-            // we can't even afford one more share
-            if (marginRemaining < marginRequiredForSingleShare) return;
-
-            // we want marginRequired to end up between this and marginRemaining
-            var marginRequiredLowerThreshold = marginRemaining - marginRequiredForSingleShare;
-
-            // iterate until we get a decent estimate, max out at 10 loops.
-            int loops = 0;
-            var marginRequired = marginRequiredForSingleShare;
-            while (marginRequired > marginRemaining || marginRequired < marginRequiredLowerThreshold)
-            {
-                var marginPerShare = marginRequired/quantity;
-                quantity = (int) Math.Truncate(marginRemaining/marginPerShare);
-                marketOrder.Quantity = quantity;
-                if (quantity == 0)
-                {
-                    // can't order anything
-                    return;
-                }
-                marginRequired = security.MarginModel.GetInitialMarginRequiredForOrder(security, marketOrder);
-
-                // no need to iterate longer than 10
-                if (++loops > 10) break;
+                iterations++;
             }
 
-            // nothing to change
-            if (quantity == 0)
-            {
-                return;
-            }
-
-            // adjust for going short
-            if (direction == OrderDirection.Sell)
-            {
-                quantity *= -1;
-            }
-
-            MarketOrder(symbol, quantity, false, tag);
+            // add directionality back in
+            return (direction == OrderDirection.Sell ? -1 : 1) * orderQuantity;
         }
 
         /// <summary>
@@ -631,7 +614,7 @@ namespace QuantConnect.Algorithm
         /// <param name="tag">Custom data for this order</param>
         /// <returns>Integer Order ID.</returns>
         [Obsolete("This Order method has been made obsolete, use Order(string, int, bool, string) method instead. Calls to the obsolete method will only generate market orders.")]
-        public int Order(string symbol, int quantity, OrderType type, bool asynchronous = false, string tag = "")
+        public OrderTicket Order(string symbol, int quantity, OrderType type, bool asynchronous = false, string tag = "")
         {
             return Order(symbol, quantity, asynchronous, tag);
         }
@@ -643,7 +626,7 @@ namespace QuantConnect.Algorithm
         /// <param name="quantity"></param>
         /// <param name="type"></param>
         [Obsolete("This Order method has been made obsolete, use the specialized Order helper methods instead. Calls to the obsolete method will only generate market orders.")]
-        public int Order(string symbol, decimal quantity, OrderType type)
+        public OrderTicket Order(string symbol, decimal quantity, OrderType type)
         {
             return Order(symbol, (int)quantity);
         }
@@ -655,9 +638,14 @@ namespace QuantConnect.Algorithm
         /// <param name="quantity"></param>
         /// <param name="type"></param>
         [Obsolete("This Order method has been made obsolete, use the specialized Order helper methods instead. Calls to the obsolete method will only generate market orders.")]
-        public int Order(string symbol, int quantity, OrderType type)
+        public OrderTicket Order(string symbol, int quantity, OrderType type)
         {
             return Order(symbol, quantity);
+        }
+
+        private SubmitOrderRequest CreateSubmitOrderRequest(OrderType orderType, Security security, int quantity, string tag, decimal stopPrice = 0m, decimal limitPrice = 0m)
+        {
+            return new SubmitOrderRequest(orderType, security.Type, security.Symbol, quantity, stopPrice, limitPrice, UtcTime, tag);
         }
     }
 }

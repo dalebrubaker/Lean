@@ -35,6 +35,7 @@ namespace QuantConnect.Util
         {
             return lookup.ToDictionary(grouping => grouping.Key, grouping => grouping.ToList());
         }
+
         /// <summary>
         /// Creates a dictionary enumerable of key value pairs
         /// </summary>
@@ -48,6 +49,30 @@ namespace QuantConnect.Util
         }
 
         /// <summary>
+        /// Creates a new <see cref="HashSet{T}"/> from the elements in the specified enumerable
+        /// </summary>
+        /// <typeparam name="T">The item type in the hash set</typeparam>
+        /// <param name="enumerable">The items to be placed into the enumerable</param>
+        /// <returns>A new <see cref="HashSet{T}"/> containing the items in the enumerable</returns>
+        public static HashSet<T> ToHashSet<T>(this IEnumerable<T> enumerable)
+        {
+            return new HashSet<T>(enumerable);
+        }
+
+        /// <summary>
+        /// Creates a new <see cref="HashSet{T}"/> from the elements in the specified enumerable
+        /// </summary>
+        /// <typeparam name="T">The item type of the source enumerable</typeparam>
+        /// <typeparam name="TResult">The type of the items in the output <see cref="HashSet{T}"/></typeparam>
+        /// <param name="enumerable">The items to be placed into the enumerable</param>
+        /// <param name="selector">Selects items from the enumerable to be placed into the <see cref="HashSet{T}"/></param>
+        /// <returns>A new <see cref="HashSet{T}"/> containing the items in the enumerable</returns>
+        public static HashSet<TResult> ToHashSet<T, TResult>(this IEnumerable<T> enumerable, Func<T, TResult> selector)
+        {
+            return new HashSet<TResult>(enumerable.Select(selector));
+        }
+
+        /// <summary>
         /// Returns true if the specified enumerable is null or has no elements
         /// </summary>
         /// <typeparam name="T">The enumerable's item type</typeparam>
@@ -56,6 +81,14 @@ namespace QuantConnect.Util
         public static bool IsNullOrEmpty<T>(this IEnumerable<T> enumerable)
         {
             return enumerable == null || !enumerable.Any();
+        }
+
+        /// <summary>
+        /// Performs the specified selector before calling DefaultIfEmpty. This is just short hand for Select(selector).DefaultIfEmpty(defaultValue)
+        /// </summary>
+        public static IEnumerable<TResult> DefaultIfEmpty<T, TResult>(this IEnumerable<T> enumerable, Func<T, TResult> selector, TResult defaultValue = default(TResult))
+        {
+            return enumerable.Select(selector).DefaultIfEmpty(defaultValue);
         }
 
         /// <summary>

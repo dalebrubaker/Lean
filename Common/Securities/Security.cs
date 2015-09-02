@@ -32,6 +32,8 @@ namespace QuantConnect.Securities
     /// </remarks>
     public class Security 
     {
+        private LocalTimeKeeper _localTimeKeeper;
+
         private readonly string _symbol;
         private readonly bool _isDynamicallyLoadedData;
         private readonly SubscriptionDataConfig _config;
@@ -204,14 +206,14 @@ namespace QuantConnect.Securities
         /// <summary>
         /// Construct a new security vehicle based on the user options.
         /// </summary>
-        public Security(SubscriptionDataConfig config, decimal leverage, bool isDynamicallyLoadedData = false) 
+        public Security(SecurityExchangeHours exchangeHours, SubscriptionDataConfig config, decimal leverage, bool isDynamicallyLoadedData = false) 
         {
             _config = config;
             _symbol = config.Symbol;
             _isDynamicallyLoadedData = isDynamicallyLoadedData;
 
             Cache = new SecurityCache();
-            Exchange = new SecurityExchange();
+            Exchange = new SecurityExchange(exchangeHours);
             DataFilter = new SecurityDataFilter();
             PortfolioModel = new SecurityPortfolioModel();
             TransactionModel = new SecurityTransactionModel();
@@ -245,11 +247,15 @@ namespace QuantConnect.Securities
         /// <summary>
         /// Local time for this market 
         /// </summary>
-        public virtual DateTime Time 
+        public virtual DateTime LocalTime
         {
-            get 
+            get
             {
-                return Exchange.Time;
+                if (_localTimeKeeper == null)
+                {
+                    throw new Exception("Security.SetLocalTimeKeeper(LocalTimeKeeper) must be called in order to use the LocalTime property.");
+                }
+                return _localTimeKeeper.LocalTime;
             }
         }
 
@@ -373,9 +379,6 @@ namespace QuantConnect.Securities
             }
         }
 
-        /******************************************************** 
-        * CLASS METHODS
-        *********************************************************/
         /// <summary>
         /// Get the last price update set to the security.
         /// </summary>
@@ -386,15 +389,26 @@ namespace QuantConnect.Securities
         }
 
         /// <summary>
+        /// Sets the <see cref="LocalTimeKeeper"/> to be used for this <see cref="Security"/>.
+        /// This is the source of this instance's time.
+        /// </summary>
+        /// <param name="localTimeKeeper">The source of this <see cref="Security"/>'s time.</param>
+        public void SetLocalTimeKeeper(LocalTimeKeeper localTimeKeeper)
+        {
+            _localTimeKeeper = localTimeKeeper;
+            _localTimeKeeper.TimeUpdated += (sender, args) =>
+            {
+                //Update the Exchange/Timer:
+                Exchange.SetLocalDateTimeFrontier(args.Time);
+            };
+        }
+
+        /// <summary>
         /// Update any security properties based on the lastest market data and time
         /// </summary>
         /// <param name="data">New data packet from LEAN</param>
-        /// <param name="frontier">Time frontier / where we are in time.</param>
-        public void SetMarketPrice(DateTime frontier, BaseData data) 
-        { 
-            //Update the Exchange/Timer:
-            Exchange.SetDateTimeFrontier(frontier);
-
+        public void SetMarketPrice(BaseData data) 
+        {
             //Add new point to cache:
             if (data == null) return;
             Cache.AddData(data);
@@ -419,18 +433,15 @@ namespace QuantConnect.Securities
         }
 
         /// <summary>
-        /// Sets the market / scope for this security
+        /// Returns a string that represents the current object.
         /// </summary>
-        public void SetMarket(string market)
+        /// <returns>
+        /// A string that represents the current object.
+        /// </returns>
+        /// <filterpriority>2</filterpriority>
+        public override string ToString()
         {
-            if (string.IsNullOrWhiteSpace(market))
-                throw new ArgumentException("The market cannot be an empty string.");
-
-            if (!Regex.IsMatch(market, @"^[a-zA-Z]+$"))
-                throw new ArgumentException("The market must only contain letters A-Z.");
-
-            _config.Market = market;
+            return Symbol;
         }
-
-    } // End Security
-} // End QC Namespace
+    }
+}

@@ -161,10 +161,7 @@ namespace QuantConnect.Securities
         /// </summary>
         public virtual decimal HoldingsValue
         {
-            get
-            {
-                return _price * Convert.ToDecimal(Quantity);
-            }
+            get { return _price*Convert.ToDecimal(Quantity); }
         }
 
         /// <summary>
@@ -173,12 +170,9 @@ namespace QuantConnect.Securities
         /// <seealso cref="HoldingsValue"/>
         public virtual decimal AbsoluteHoldingsValue
         {
-            get
-            {
-                return Math.Abs(HoldingsValue);
-            }
+            get { return Math.Abs(HoldingsValue); }
         }
-        
+
         /// <summary>
         /// Boolean flat indicating if we hold any of the security
         /// </summary>
@@ -374,7 +368,7 @@ namespace QuantConnect.Securities
             }
 
             // this is in the account currency
-            var marketOrder = new MarketOrder(_security.Symbol, -Quantity, _security.Time, type: _security.Type) {Price = Price};
+            var marketOrder = new MarketOrder(_security.Symbol, -Quantity, _security.LocalTime.ConvertToUtc(_security.Exchange.TimeZone), type: _security.Type);
             var orderFee = _security.TransactionModel.GetOrderFee(_security, marketOrder);
 
             return (Price - AveragePrice) * Quantity - orderFee;

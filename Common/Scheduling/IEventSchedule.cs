@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  * 
@@ -11,28 +11,26 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
 */
-using QuantConnect.Orders;
 
-namespace QuantConnect.Securities
+namespace QuantConnect.Scheduling
 {
     /// <summary>
-    /// Represents a type capable of fetching Order instances by its QC order id or by a brokerage id
+    /// Provides the ability to add/remove scheduled events from the real time handler
     /// </summary>
-    public interface IOrderMapping
+    public interface IEventSchedule
     {
         /// <summary>
-        /// Get the order by its id
+        /// Adds the specified event to the schedule using the <see cref="ScheduledEvent.Name"/> as a key.
         /// </summary>
-        /// <param name="orderId">Order id to fetch</param>
-        /// <returns>The order with the specified id, or null if no match is found</returns>
-        Order GetOrderById(int orderId);
+        /// <param name="scheduledEvent">The event to be scheduled, including the date/times the event fires and the callback</param>
+        void Add(ScheduledEvent scheduledEvent);
 
         /// <summary>
-        /// Gets the order by its brokerage id
+        /// Removes the event with the specified name from the schedule
         /// </summary>
-        /// <param name="brokerageId">The brokerage id to fetch</param>
-        /// <returns>The first order matching the brokerage id, or null if no match is found</returns>
-        Order GetOrderByBrokerageId(int brokerageId);
+        /// <param name="name">The name of the event to be removed</param>
+        void Remove(string name);
     }
 }

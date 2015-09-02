@@ -15,6 +15,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace QuantConnect.Orders
 {
@@ -26,62 +27,62 @@ namespace QuantConnect.Orders
         /// <summary>
         /// Order ID.
         /// </summary>
-        public int Id;
+        public int Id { get; internal set; }
 
         /// <summary>
         /// Order id to process before processing this order.
         /// </summary>
-        public int ContingentId;
+        public int ContingentId { get; internal set; }
 
         /// <summary>
         /// Brokerage Id for this order for when the brokerage splits orders into multiple pieces
         /// </summary>
-        public List<long> BrokerId;
+        public List<long> BrokerId { get; internal set; }
 
         /// <summary>
         /// Symbol of the Asset
         /// </summary>
-        public string Symbol;
+        public string Symbol { get; internal set; }
         
         /// <summary>
         /// Price of the Order.
         /// </summary>
-        public decimal Price;
+        public decimal Price { get; internal set; }
 
         /// <summary>
         /// Time the order was created.
         /// </summary>
-        public DateTime Time;
+        public DateTime Time { get; internal set; }
 
         /// <summary>
         /// Number of shares to execute.
         /// </summary>
-        public int Quantity;
+        public int Quantity { get; internal set; }
 
         /// <summary>
         /// Order Type
         /// </summary>
-        public OrderType Type { get; private set; }
+        public abstract OrderType Type { get; }
 
         /// <summary>
         /// Status of the Order
         /// </summary>
-        public OrderStatus Status;
+        public OrderStatus Status { get; internal set; }
 
         /// <summary>
         /// Order duration - GTC or Day. Day not supported in backtests.
         /// </summary>
-        public OrderDuration Duration = OrderDuration.GTC;
+        public OrderDuration Duration { get; internal set; }
 
         /// <summary>
         /// Tag the order with some custom data
         /// </summary>
-        public string Tag;
+        public string Tag { get; internal set; }
 
         /// <summary>
         /// The symbol's security type
         /// </summary>
-        public SecurityType SecurityType = SecurityType.Equity;
+        public SecurityType SecurityType { get; internal set; }
 
         /// <summary>
         /// Order Direction Property based off Quantity.
@@ -113,6 +114,7 @@ namespace QuantConnect.Orders
         /// <summary>
         /// Value of the order at limit price if a limit order, or market price if a market order.
         /// </summary>
+        [Obsolete("Value property has been made obsolete. Use GetValue(currentMarketPrice) instead.")]
         public abstract decimal Value 
         { 
             get; 
@@ -121,11 +123,10 @@ namespace QuantConnect.Orders
         /// <summary>
         /// Added a default constructor for JSON Deserialization:
         /// </summary>
-        protected Order(OrderType type)
+        protected Order()
         {
             Time = new DateTime();
             Price = 0;
-            Type = type;
             Quantity = 0;
             Symbol = "";
             Status = OrderStatus.None;
@@ -142,15 +143,12 @@ namespace QuantConnect.Orders
         /// <param name="symbol">Symbol asset we're seeking to trade</param>
         /// <param name="type">Type of the security order</param>
         /// <param name="quantity">Quantity of the asset we're seeking to trade</param>
-        /// <param name="order">Order type (market, limit or stoploss order)</param>
         /// <param name="time">Time the order was placed</param>
-        /// <param name="price">Price the order should be filled at if a limit order</param>
         /// <param name="tag">User defined data tag for this order</param>
-        protected Order(string symbol, int quantity, OrderType order, DateTime time, decimal price = 0, string tag = "", SecurityType type = SecurityType.Base)
+        protected Order(string symbol, int quantity, DateTime time, string tag = "", SecurityType type = SecurityType.Base)
         {
             Time = time;
-            Price = price;
-            Type = order;
+            Price = 0;
             Quantity = quantity;
             Symbol = symbol;
             Status = OrderStatus.None;
@@ -167,15 +165,12 @@ namespace QuantConnect.Orders
         /// <param name="symbol">Symbol asset we're seeking to trade</param>
         /// <param name="type"></param>
         /// <param name="quantity">Quantity of the asset we're seeking to trade</param>
-        /// <param name="order">Order type (market, limit or stoploss order)</param>
         /// <param name="time">Time the order was placed</param>
-        /// <param name="price">Price the order should be filled at if a limit order</param>
         /// <param name="tag">User defined data tag for this order</param>
-        protected Order(string symbol, SecurityType type, int quantity, OrderType order, DateTime time, decimal price = 0, string tag = "") 
+        protected Order(string symbol, SecurityType type, int quantity, DateTime time, string tag = "") 
         {
             Time = time;
-            Price = price;
-            Type = order;
+            Price = 0;
             Quantity = quantity;
             Symbol = symbol;
             Status = OrderStatus.None;
@@ -187,6 +182,34 @@ namespace QuantConnect.Orders
         }
 
         /// <summary>
+        /// Gets the value of this order at the given market price.
+        /// NOTE: Some order types derive value from other parameters, such as limit prices
+        /// </summary>
+        /// <param name="currentMarketPrice">The current market price of the security</param>
+        /// <returns>The value of this order given the current market price</returns>
+        public abstract decimal GetValue(decimal currentMarketPrice);
+
+        /// <summary>
+        /// Modifies the state of this order to match the update request
+        /// </summary>
+        /// <param name="request">The request to update this order object</param>
+        public virtual void ApplyUpdateOrderRequest(UpdateOrderRequest request)
+        {
+            if (request.OrderId != Id)
+            {
+                throw new ArgumentException("Attempted to apply updates to the incorrect order!");
+            }
+            if (request.Quantity.HasValue)
+            {
+                Quantity = request.Quantity.Value;
+            }
+            if (request.Tag != null)
+            {
+                Tag = request.Tag;
+            }
+        }
+
+        /// <summary>
         /// Returns a string that represents the current object.
         /// </summary>
         /// <returns>
@@ -195,7 +218,72 @@ namespace QuantConnect.Orders
         /// <filterpriority>2</filterpriority>
         public override string ToString()
         {
-            return string.Format("{0} order for {1} unit{3} of {2}", Type, Quantity, Symbol, Quantity == 1 ? "" : "s");
+            return string.Format("OrderId: {0} {1} {2} order for {3} unit{4} of {5}", Id, Status, Type, Quantity, Quantity == 1 ? "" : "s", Symbol);
+        }
+
+        /// <summary>
+        /// Creates a deep-copy clone of this order
+        /// </summary>
+        /// <returns>A copy of this order</returns>
+        public abstract Order Clone();
+
+        /// <summary>
+        /// Copies base Order properties to the specified order
+        /// </summary>
+        /// <param name="order">The target of the copy</param>
+        protected void CopyTo(Order order)
+        {
+            order.Id = Id;
+            order.Time = Time;
+            order.BrokerId = BrokerId.ToList();
+            order.ContingentId = ContingentId;
+            order.Duration = Duration;
+            order.Price = Price;
+            order.Quantity = Quantity;
+            order.SecurityType = SecurityType;
+            order.Status = Status;
+            order.Symbol = Symbol;
+            order.Tag = Tag;
+        }
+
+        /// <summary>
+        /// Creates an <see cref="Order"/> to match the specified <paramref name="request"/>
+        /// </summary>
+        /// <param name="request">The <see cref="SubmitOrderRequest"/> to create an order for</param>
+        /// <returns>The <see cref="Order"/> that matches the request</returns>
+        public static Order CreateOrder(SubmitOrderRequest request)
+        {
+            Order order;
+            switch (request.OrderType)
+            {
+                case OrderType.Market:
+                    order =  new MarketOrder(request.Symbol, request.Quantity, request.Time, request.Tag, request.SecurityType);
+                    break;
+                case OrderType.Limit:
+                    order =  new LimitOrder(request.Symbol, request.Quantity, request.LimitPrice, request.Time, request.Tag, request.SecurityType);
+                    break;
+                case OrderType.StopMarket:
+                    order =  new StopMarketOrder(request.Symbol, request.Quantity, request.StopPrice, request.Time, request.Tag, request.SecurityType);
+                    break;
+                case OrderType.StopLimit:
+                    order =  new StopLimitOrder(request.Symbol, request.Quantity, request.StopPrice, request.LimitPrice, request.Time, request.Tag, request.SecurityType);
+                    break;
+                case OrderType.MarketOnOpen:
+                    order =  new MarketOnOpenOrder(request.Symbol, request.SecurityType, request.Quantity, request.Time, request.Tag);
+                    break;
+                case OrderType.MarketOnClose:
+                    order =  new MarketOnCloseOrder(request.Symbol, request.SecurityType, request.Quantity, request.Time, request.Tag);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+            order.Status = OrderStatus.New;
+            order.Id = request.OrderId;
+            if (request.Tag != null)
+            {
+                order.Tag = request.Tag;
+            }
+            return order;
         }
     }
 }

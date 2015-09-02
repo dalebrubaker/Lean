@@ -20,9 +20,24 @@ namespace QuantConnect.Data.Market
         }
 
         /// <summary>
+        /// Initializes a new instance of the <see cref="QuantConnect.Data.Market.DataDictionary{T}"/> class
+        /// using the specified <paramref name="data"/> as a data source
+        /// </summary>
+        /// <param name="data">The data source for this data dictionary</param>
+        /// <param name="keySelector">Delegate used to select a key from the value</param>
+        public DataDictionary(IEnumerable<T> data, Func<T, string> keySelector)
+        {
+            foreach (var datum in data)
+            {
+                this[keySelector(datum)] = datum;
+            }
+        }
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="QuantConnect.Data.Market.DataDictionary{T}"/> class.
         /// </summary>
         /// <param name="time">The time this data was emitted.</param>
+        [Obsolete("The DataDictionary<T> Time property is now obsolete. All algorithms should use algorithm.Time instead.")]
         public DataDictionary(DateTime time)
         {
             Time = time;
@@ -31,6 +46,7 @@ namespace QuantConnect.Data.Market
         /// <summary>
         /// Gets or sets the time associated with this collection of data
         /// </summary>
+        [Obsolete("The DataDictionary<T> Time property is now obsolete. All algorithms should use algorithm.Time instead.")]
         public DateTime Time { get; set; }
 
         /// <summary>
@@ -191,7 +207,7 @@ namespace QuantConnect.Data.Market
                 {
                     return data;
                 }
-                throw new KeyNotFoundException(string.Format("'{0}' wasn't found in the {1} object, likely because there was no-data at this moment in time and it wasn't possible to fillforward historical data. Please check the data exists before accessing it with data.ContainsKey(\"{0}\")", key, GetType().Name));
+                throw new KeyNotFoundException(string.Format("'{0}' wasn't found in the {1} object, likely because there was no-data at this moment in time and it wasn't possible to fillforward historical data. Please check the data exists before accessing it with data.ContainsKey(\"{0}\")", key, GetType().GetBetterTypeName()));
             }
             set
             {

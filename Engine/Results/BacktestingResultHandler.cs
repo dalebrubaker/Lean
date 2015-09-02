@@ -23,6 +23,7 @@ using Newtonsoft.Json;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Lean.Engine.Setup;
+using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
@@ -71,6 +72,7 @@ namespace QuantConnect.Lean.Engine.Results
         private DateTime _nextSample;
         private IMessagingHandler _messagingHandler;
         private IApi _api;
+        private ITransactionHandler _transactionHandler;
 
         private const double _samples = 4000;
         private const double _minimumSamplePeriod = 4;
@@ -189,10 +191,12 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="api">The api instance used for handling logs</param>
         /// <param name="dataFeed"></param>
         /// <param name="setupHandler"></param>
-        public void Initialize(AlgorithmNodePacket job, IMessagingHandler messagingHandler, IApi api, IDataFeed dataFeed, ISetupHandler setupHandler)
+        /// <param name="transactionHandler"></param>
+        public void Initialize(AlgorithmNodePacket job, IMessagingHandler messagingHandler, IApi api, IDataFeed dataFeed, ISetupHandler setupHandler, ITransactionHandler transactionHandler)
         {
             _api = api;
             _messagingHandler = messagingHandler;
+            _transactionHandler = transactionHandler;
             _job = (BacktestNodePacket)job;
             if (_job == null) throw new Exception("BacktestingResultHandler.Constructor(): Submitted Job type invalid.");
             _compileId = _job.CompileId;
@@ -218,63 +222,73 @@ namespace QuantConnect.Lean.Engine.Results
             //SampleEquity(job.periodStart, job.startingCapital);
             //SamplePerformance(job.periodStart, 0);
 
-            while (!(_exitTriggered && Messages.Count == 0))
+            try
             {
-                //While there's no work to do, go back to the algorithm:
-                if (Messages.Count == 0)
+                while (!(_exitTriggered && Messages.Count == 0))
                 {
-                    Thread.Sleep(50);
-                }
-                else
-                {
-                    //1. Process Simple Messages in Queue
-                    Packet packet;
-                    if (Messages.TryDequeue(out packet))
+                    //While there's no work to do, go back to the algorithm:
+                    if (Messages.Count == 0)
                     {
-                        switch (packet.Type)
+                        Thread.Sleep(50);
+                    }
+                    else
+                    {
+                        //1. Process Simple Messages in Queue
+                        Packet packet;
+                        if (Messages.TryDequeue(out packet))
                         {
-                            //New Debug Message:
-                            case PacketType.Debug:
-                                var debug = packet as DebugPacket;
-                                if (lastMessage != debug.Message)
-                                {
-                                    //Log.Trace("BacktestingResultHandlerRun(): Debug Packet: " + debug.Message);
-                                    _messagingHandler.DebugMessage(debug.Message, debug.ProjectId, _backtestId, _compileId);
-                                    lastMessage = debug.Message;
-                                }
-                                break;
+                            switch (packet.Type)
+                            {
+                                //New Debug Message:
+                                case PacketType.Debug:
+                                    var debug = packet as DebugPacket;
+                                    if (lastMessage != debug.Message)
+                                    {
+                                        //Log.Trace("BacktestingResultHandlerRun(): Debug Packet: " + debug.Message);
+                                        _messagingHandler.DebugMessage(debug.Message, debug.ProjectId, _backtestId, _compileId);
+                                        lastMessage = debug.Message;
+                                    }
+                                    break;
 
-                            //Send log messages to the browser as well for live trading:
-                            case PacketType.SecurityTypes:
-                                var securityPacket = packet as SecurityTypesPacket;
-                                _messagingHandler.SecurityTypes(securityPacket);
-                                break;
+                                //Send log messages to the browser as well for live trading:
+                                case PacketType.SecurityTypes:
+                                    var securityPacket = packet as SecurityTypesPacket;
+                                    _messagingHandler.SecurityTypes(securityPacket);
+                                    break;
 
-                            case PacketType.RuntimeError:
-                                //Log.Error("QC.AlgorithmWorker.Run(): " + packet.Message);
-                                var runtime = packet as RuntimeErrorPacket;
-                                _messagingHandler.RuntimeError(_backtestId, runtime.Message, runtime.StackTrace);
-                                break;
+                                case PacketType.RuntimeError:
+                                    //Log.Error("QC.AlgorithmWorker.Run(): " + packet.Message);
+                                    var runtime = packet as RuntimeErrorPacket;
+                                    _messagingHandler.RuntimeError(_backtestId, runtime.Message, runtime.StackTrace);
+                                    break;
 
-                            case PacketType.HandledError:
-                                var handled = packet as HandledErrorPacket;
-                                Log.Error("BacktestingResultHandler.Run(): HandledError Packet: " + handled.Message);
-                                _messagingHandler.Send(handled);
-                                break;
+                                case PacketType.HandledError:
+                                    var handled = packet as HandledErrorPacket;
+                                    Log.Error("BacktestingResultHandler.Run(): HandledError Packet: " + handled.Message);
+                                    _messagingHandler.Send(handled);
+                                    break;
 
-                            default:
-                                //Default case..
-                                _messagingHandler.Send(packet);
-                                Log.Trace("BacktestingResultHandler.Run(): Default packet type: " + packet.Type);
-                                break;
+                                default:
+                                    //Default case..
+                                    _messagingHandler.Send(packet);
+                                    Log.Trace("BacktestingResultHandler.Run(): Default packet type: " + packet.Type);
+                                    break;
+                            }
                         }
                     }
-                }
 
-                //2. Update the packet scanner:
-                Update();
+                    //2. Update the packet scanner:
+                    Update();
 
-            } // While !End.
+                } // While !End.
+            }
+            catch (Exception err)
+            {
+                // unexpected error, we need to close down shop
+                Log.Error(err);
+                // quit the algorithm due to error
+                _algorithm.RunTimeError = err;
+            }
 
             Log.Trace("BacktestingResultHandler.Run(): Ending Thread...");
             _isActive = false;
@@ -300,7 +314,7 @@ namespace QuantConnect.Lean.Engine.Results
 
                 try
                 {
-                    deltaOrders = (from order in Algorithm.Transactions.Orders
+                    deltaOrders = (from order in _transactionHandler.Orders
                         where order.Value.Time.Date >= _lastUpdate && order.Value.Status == OrderStatus.Filled
                         select order).ToDictionary(t => t.Key, t => t.Value);
                 }
@@ -339,7 +353,7 @@ namespace QuantConnect.Lean.Engine.Results
                 if (progress > 0.999m) progress = 0.999m;
 
                 //1. Cloud Upload -> Upload the whole packet to S3  Immediately:
-                var completeResult = new BacktestResult(Charts, Algorithm.Transactions.Orders, Algorithm.Transactions.TransactionRecord, new Dictionary<string, string>());
+                var completeResult = new BacktestResult(Charts, _transactionHandler.Orders, Algorithm.Transactions.TransactionRecord, new Dictionary<string, string>());
                 var complete = new BacktestResultPacket(_job, completeResult, progress);
 
                 if (DateTime.Now > _nextS3Update)
@@ -484,7 +498,7 @@ namespace QuantConnect.Lean.Engine.Results
             _algorithm = algorithm;
             
             //Setup the sampling periods:
-            _jobDays = Time.TradeableDates(Algorithm.Securities, _job.PeriodStart, _job.PeriodFinish);
+            _jobDays = Time.TradeableDates(Algorithm.Securities.Values, _job.PeriodStart, _job.PeriodFinish);
 
             //Setup Debug Messaging:
             _debugMessageMax = Convert.ToInt32(10 * _jobDays);
@@ -637,6 +651,17 @@ namespace QuantConnect.Lean.Engine.Results
         {
             //Added a second chart to equity plot - daily perforamnce:
             Sample("Strategy Equity", ChartType.Stacked, "Daily Performance", SeriesType.Bar, time, value, "%");
+        }
+
+        /// <summary>
+        /// Sample the current benchmark performance directly with a time-value pair.
+        /// </summary>
+        /// <param name="time">Current backtest date.</param>
+        /// <param name="value">Current benchmark value.</param>
+        /// <seealso cref="IResultHandler.Sample"/>
+        public void SampleBenchmark(DateTime time, decimal value)
+        {
+            Sample("Benchmark", ChartType.Stacked, "Benchmark", SeriesType.Line, time, value);
         }
 
         /// <summary>

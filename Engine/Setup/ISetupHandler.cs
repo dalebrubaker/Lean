@@ -18,7 +18,9 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using QuantConnect.Interfaces;
+using QuantConnect.Lean.Engine.RealTime;
 using QuantConnect.Lean.Engine.Results;
+using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Packets;
 
 namespace QuantConnect.Lean.Engine.Setup
@@ -74,8 +76,9 @@ namespace QuantConnect.Lean.Engine.Setup
         /// Create a new instance of an algorithm from a physical dll path.
         /// </summary>
         /// <param name="assemblyPath">The path to the assembly's location</param>
+        /// <param name="language">Language of the assembly.</param>
         /// <returns>A new instance of IAlgorithm, or throws an exception if there was an error</returns>
-        IAlgorithm CreateAlgorithmInstance(string assemblyPath);
+        IAlgorithm CreateAlgorithmInstance(string assemblyPath, Language language);
 
         /// <summary>
         /// Primary entry point to setup a new algorithm
@@ -83,9 +86,11 @@ namespace QuantConnect.Lean.Engine.Setup
         /// <param name="algorithm">Algorithm instance</param>
         /// <param name="brokerage">New brokerage output instance</param>
         /// <param name="job">Algorithm job task</param>
-        /// <param name="resultHandler"></param>
+        /// <param name="resultHandler">The configured result handler</param>
+        /// <param name="transactionHandler">The configurated transaction handler</param>
+        /// <param name="realTimeHandler">The configured real time handler</param>
         /// <returns>True on successfully setting up the algorithm state, or false on error.</returns>
-        bool Setup(IAlgorithm algorithm, out IBrokerage brokerage, AlgorithmNodePacket job, IResultHandler resultHandler);
+        bool Setup(IAlgorithm algorithm, out IBrokerage brokerage, AlgorithmNodePacket job, IResultHandler resultHandler, ITransactionHandler transactionHandler, IRealTimeHandler realTimeHandler);
 
         /// <summary>
         /// Setup the error handler for the brokerage errors.

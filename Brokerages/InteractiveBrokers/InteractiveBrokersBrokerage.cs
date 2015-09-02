@@ -18,6 +18,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -53,7 +54,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
         private readonly string _account;
         private readonly string _host;
         private readonly int _clientID;
-        private readonly IOrderMapping _orderMapping;
+        private readonly IOrderProvider _orderProvider;
         private readonly IB.IBClient _client;
         private readonly IB.AgentDescription _agentDescription;
 
@@ -90,10 +91,10 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
         ///     ib-port (optional, defaults to 4001)
         ///     ib-agent-description (optional, defaults to Individual)
         /// </summary>
-        /// <param name="orderMapping">An instance of IOrderMapping used to fetch Order objects by brokerage ID</param>
-        public InteractiveBrokersBrokerage(IOrderMapping orderMapping)
+        /// <param name="orderProvider">An instance of IOrderMapping used to fetch Order objects by brokerage ID</param>
+        public InteractiveBrokersBrokerage(IOrderProvider orderProvider)
             : this(
-                orderMapping,
+                orderProvider,
                 Config.Get("ib-account"),
                 Config.Get("ib-host", "LOCALHOST"),
                 Config.GetInt("ib-port", 4001),
@@ -105,10 +106,10 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
         /// <summary>
         /// Creates a new InteractiveBrokeragBrokerage for the specified account
         /// </summary>
-        /// <param name="orderMapping">An instance of IOrderMapping used to fetch Order objects by brokerage ID</param>
+        /// <param name="orderProvider">An instance of IOrderMapping used to fetch Order objects by brokerage ID</param>
         /// <param name="account">The account used to connect to IB</param>
-        public InteractiveBrokersBrokerage(IOrderMapping orderMapping, string account)
-            : this(orderMapping,
+        public InteractiveBrokersBrokerage(IOrderProvider orderProvider, string account)
+            : this(orderProvider,
                 account,
                 Config.Get("ib-host", "LOCALHOST"),
                 Config.GetInt("ib-port", 4001),
@@ -120,15 +121,15 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
         /// <summary>
         /// Creates a new InteractiveBrokersBrokerage from the specified values
         /// </summary>
-        /// <param name="orderMapping">An instance of IOrderMapping used to fetch Order objects by brokerage ID</param>
+        /// <param name="orderProvider">An instance of IOrderMapping used to fetch Order objects by brokerage ID</param>
         /// <param name="account">The Interactive Brokers account name</param>
         /// <param name="host">host name or IP address of the machine where TWS is running. Leave blank to connect to the local host.</param>
         /// <param name="port">must match the port specified in TWS on the Configure&gt;API&gt;Socket Port field.</param>
         /// <param name="agentDescription">Used for Rule 80A describes the type of trader.</param>
-        public InteractiveBrokersBrokerage(IOrderMapping orderMapping, string account, string host, int port, IB.AgentDescription agentDescription = IB.AgentDescription.Individual)
+        public InteractiveBrokersBrokerage(IOrderProvider orderProvider, string account, string host, int port, IB.AgentDescription agentDescription = IB.AgentDescription.Individual)
             : base("Interactive Brokers Brokerage")
         {
-            _orderMapping = orderMapping;
+            _orderProvider = orderProvider;
             _account = account;
             _host = host;
             _port = port;
@@ -407,6 +408,13 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
                     // we couldn't connect after several attempts, log the error and throw an exception
                     Log.Error("InteractiveBrokersBrokerage.Connect(): " + err.Message);
+
+                    // add a blurb about TWS for connection refused errors
+                    if (err.Message.Contains("Connection refused"))
+                    {
+                        throw new Exception(err.Message + ". Be sure to logout of Trader Workstation. IB only allows one active log in at a time.", err);
+                    }
+
                     throw;
                 }
             }
@@ -673,7 +681,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
                 Log.Trace(string.Format("InteractiveBrokersBrokerage.HandleError.InvalidateOrder(): Order: {0} ErrorCode: {1} - {2}", e.TickerId, e.ErrorCode, e.ErrorMsg));
 
                 // invalidate the order
-                var order = _orderMapping.GetOrderByBrokerageId(e.TickerId);
+                var order = _orderProvider.GetOrderByBrokerageId(e.TickerId);
                 var orderEvent = new OrderEvent(order) {Status = OrderStatus.Invalid};
                 OnOrderEvent(orderEvent);
             }
@@ -718,7 +726,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
                 // we want to capture if the user's cash changes so we can reflect it in the algorithm
                 if (e.Key == AccountValueKeys.NetLiquidationByCurrency && e.Currency != "BASE")
                 {
-                    var cashBalance = decimal.Parse(e.Value);
+                    var cashBalance = decimal.Parse(e.Value, CultureInfo.InvariantCulture);
                     _cashBalances.AddOrUpdate(e.Currency, cashBalance);
                     OnAccountChanged(new AccountEvent(e.Currency, cashBalance));
                 }
@@ -758,7 +766,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
                     Log.Error("InteractiveBrokersBrokerage.HandleOrderStatusUpdates(): ERROR -- " + update.OrderId);
                 }
 
-                var order = _orderMapping.GetOrderByBrokerageId(update.OrderId);
+                var order = _orderProvider.GetOrderByBrokerageId(update.OrderId);
                 if (order == null)
                 {
                     Log.Error("InteractiveBrokersBrokerage.HandleOrderStatusUpdates(): Unable to locate order with BrokerageID " + update.OrderId);

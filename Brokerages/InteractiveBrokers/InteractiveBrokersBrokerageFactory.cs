@@ -20,6 +20,7 @@ using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
+using QuantConnect.Util;
 
 namespace QuantConnect.Brokerages.InteractiveBrokers
 {
@@ -87,16 +88,18 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
             // launch the IB gateway
             InteractiveBrokersGatewayRunner.Start(ibControllerDirectory, twsDirectory, userID, password, useTws);
 
-            return new InteractiveBrokersBrokerage(algorithm.Transactions, account, host, port, agentDescription);
+            var ib = new InteractiveBrokersBrokerage(algorithm.Transactions, account, host, port, agentDescription);
+            Composer.Instance.AddPart<IDataQueueHandler>(ib);
+            return ib;
         }
 
         /// <summary>
         /// Creates a new IBrokerage instance and set ups the environment for the brokerage
         /// </summary>
         /// <param name="brokerageData">Brokerage data containing necessary parameters for initialization</param>
-        /// <param name="orderMapping">IOrderMapping instance to maintain IB -> QC order id mapping</param>
+        /// <param name="orderProvider">IOrderMapping instance to maintain IB -> QC order id mapping</param>
         /// <returns>A new brokerage instance</returns>
-        public IBrokerage CreateBrokerage(Dictionary<string, string> brokerageData, IOrderMapping orderMapping)
+        public IBrokerage CreateBrokerage(Dictionary<string, string> brokerageData, IOrderProvider orderProvider)
         {
             var errors = new List<string>();
 
@@ -121,7 +124,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
             // launch the IB gateway
             InteractiveBrokersGatewayRunner.Start(ibControllerDirectory, twsDirectory, userID, password, useTws);
 
-            return new InteractiveBrokersBrokerage(orderMapping, account, host, port, agentDescription);
+            return new InteractiveBrokersBrokerage(orderProvider, account, host, port, agentDescription);
         }
 
         /// <summary>

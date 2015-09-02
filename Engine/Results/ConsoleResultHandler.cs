@@ -23,6 +23,7 @@ using System.Threading;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Lean.Engine.Setup;
+using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
@@ -141,7 +142,8 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="api"></param>
         /// <param name="dataFeed"></param>
         /// <param name="setupHandler"></param>
-        public void Initialize(AlgorithmNodePacket packet, IMessagingHandler messagingHandler, IApi api, IDataFeed dataFeed, ISetupHandler setupHandler)
+        /// <param name="transactionHandler"></param>
+        public void Initialize(AlgorithmNodePacket packet, IMessagingHandler messagingHandler, IApi api, IDataFeed dataFeed, ISetupHandler setupHandler, ITransactionHandler transactionHandler)
         {
             // we expect one of two types here, the backtest node packet or the live node packet
             var job = packet as BacktestNodePacket;
@@ -178,22 +180,32 @@ namespace QuantConnect.Lean.Engine.Results
         /// </summary>
         public void Run()
         {
-            while ( !_exitTriggered || Messages.Count > 0 ) 
+            try
             {
-                Thread.Sleep(100);
-
-                var now = DateTime.UtcNow;
-                if (now > _updateTime)
+                while ( !_exitTriggered || Messages.Count > 0 ) 
                 {
-                    _updateTime = now.AddSeconds(5);
-                    _algorithmNode.LogAlgorithmStatus(_lastSampledTimed);
+                    Thread.Sleep(100);
+
+                    var now = DateTime.UtcNow;
+                    if (now > _updateTime)
+                    {
+                        _updateTime = now.AddSeconds(5);
+                        _algorithmNode.LogAlgorithmStatus(_lastSampledTimed);
+                    }
+                }
+
+                // Write Equity and EquityPerformance files in charts directory
+                foreach (var fileName in _equityResults.Keys)
+                {
+                    File.WriteAllLines(fileName, _equityResults[fileName]);
                 }
             }
-
-            // Write Equity and EquityPerformance files in charts directory
-            foreach (var fileName in _equityResults.Keys)
+            catch (Exception err)
             {
-                File.WriteAllLines(fileName, _equityResults[fileName]);
+                // unexpected error, we need to close down shop
+                Log.Error(err);
+                // quit the algorithm due to error
+                _algorithm.RunTimeError = err;
             }
 
             Log.Trace("ConsoleResultHandler: Ending Thread...");
@@ -206,7 +218,7 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="message">Message we'd like shown in console.</param>
         public void DebugMessage(string message)
         {
-            Log.Trace("Debug Message >> " + message);
+            Log.Trace(_algorithm.Time + ": Debug >> " + message);
         }
 
         /// <summary>
@@ -215,7 +227,7 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="message">Message we'd in the log.</param>
         public void LogMessage(string message)
         {
-            Log.Trace("Log Message >> " + message);
+            Log.Trace(_algorithm.Time + ": Log >> " + message);
         }
 
         /// <summary>
@@ -225,7 +237,7 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="stacktrace">Stacktrace information string</param>
         public void RuntimeError(string message, string stacktrace = "")
         {
-            Log.Error("Error Message >> " + message + (!string.IsNullOrEmpty(stacktrace) ? (" >> ST: " + stacktrace) : ""));
+            Log.Error(_algorithm.Time + ": Error >> " + message + (!string.IsNullOrEmpty(stacktrace) ? (" >> ST: " + stacktrace) : ""));
         }
 
         /// <summary>
@@ -235,7 +247,7 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="stacktrace">Stacktrace information string</param>
         public void ErrorMessage(string message, string stacktrace = "")
         {
-            Log.Error("Error Message >> " + message + (!string.IsNullOrEmpty(stacktrace) ? (" >> ST: " + stacktrace) : ""));
+            Log.Error(_algorithm.Time + ": Error >> " + message + (!string.IsNullOrEmpty(stacktrace) ? (" >> ST: " + stacktrace) : ""));
         }
 
         /// <summary>
@@ -302,6 +314,16 @@ namespace QuantConnect.Lean.Engine.Results
             Sample("Strategy Equity", ChartType.Overlay, "Daily Performance", SeriesType.Line, time, value, "%");
         }
 
+        /// <summary>
+        /// Sample the current benchmark performance directly with a time-value pair.
+        /// </summary>
+        /// <param name="time">Current backtest date.</param>
+        /// <param name="value">Current benchmark value.</param>
+        /// <seealso cref="IResultHandler.Sample"/>
+        public void SampleBenchmark(DateTime time, decimal value)
+        {
+            Sample("Benchmark", ChartType.Stacked, "Benchmark", SeriesType.Line, time, value);
+        }
 
         /// <summary>
         /// Analyse the algorithm and determine its security types.
@@ -379,13 +401,13 @@ namespace QuantConnect.Lean.Engine.Results
         public void SendFinalResult(AlgorithmNodePacket job, Dictionary<int, Order> orders, Dictionary<DateTime, decimal> profitLoss, Dictionary<string, Holding> holdings, Dictionary<string, string> statistics, Dictionary<string, string> banner)
         {
             // uncomment these code traces to help write regression tests
-            //Log.Trace("var statistics = new Dictionary<string, string>();");
+            //Console.WriteLine("var statistics = new Dictionary<string, string>();");
             
             // Bleh. Nicely format statistical analysis on your algorithm results. Save to file etc.
             foreach (var pair in statistics) 
             {
                 Log.Trace("STATISTICS:: " + pair.Key + " " + pair.Value);
-                //Log.Trace(string.Format("statistics.Add(\"{0}\",\"{1}\");", pair.Key, pair.Value));
+                //Console.WriteLine(string.Format("statistics.Add(\"{0}\",\"{1}\");", pair.Key, pair.Value));
             }
 
             FinalStatistics = statistics;

@@ -23,6 +23,14 @@ namespace QuantConnect.Orders
     public class MarketOnCloseOrder : Order
     {
         /// <summary>
+        /// MarketOnClose Order Type
+        /// </summary>
+        public override OrderType Type
+        {
+            get { return OrderType.MarketOnClose; }
+        }
+
+        /// <summary>
         /// Value of the order at limit price if a limit order, or market price if a market order.
         /// </summary>
         public override decimal Value
@@ -34,7 +42,6 @@ namespace QuantConnect.Orders
         /// Intiializes a new instance of the <see cref="MarketOnCloseOrder"/> class.
         /// </summary>
         public MarketOnCloseOrder()
-            : base(OrderType.MarketOnClose)
         {
         }
 
@@ -45,11 +52,31 @@ namespace QuantConnect.Orders
         /// <param name="type">The security type of the symbol</param>
         /// <param name="quantity">The number of units to order</param>
         /// <param name="time">The current time</param>
-        /// <param name="marketPrice">The current market price of the security, used to estimate the value of the order</param>
         /// <param name="tag">A user defined tag for the order</param>
-        public MarketOnCloseOrder(string symbol, SecurityType type, int quantity, DateTime time, decimal marketPrice = 0m, string tag = "")
-            : base(symbol, quantity, OrderType.MarketOnClose, time, marketPrice, tag, type)
+        public MarketOnCloseOrder(string symbol, SecurityType type, int quantity, DateTime time, string tag = "")
+            : base(symbol, quantity, time, tag, type)
         {
+        }
+
+        /// <summary>
+        /// Gets the value of this order at the given market price.
+        /// </summary>
+        /// <param name="currentMarketPrice">The current market price of the security</param>
+        /// <returns>The value of this order given the current market price</returns>
+        public override decimal GetValue(decimal currentMarketPrice)
+        {
+            return Quantity * currentMarketPrice;
+        }
+
+        /// <summary>
+        /// Creates a deep-copy clone of this order
+        /// </summary>
+        /// <returns>A copy of this order</returns>
+        public override Order Clone()
+        {
+            var order = new MarketOnCloseOrder();
+            CopyTo(order);
+            return order;
         }
     }
 }

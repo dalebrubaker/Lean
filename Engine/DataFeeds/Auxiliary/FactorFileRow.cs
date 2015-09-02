@@ -64,16 +64,28 @@ namespace QuantConnect.Lean.Engine.DataFeeds.Auxiliary
         /// </summary>
         public static IEnumerable<FactorFileRow> Read(string symbol, string market)
         {
-            string format = Constants.DataFolder + "equity/" + market + "/factor_files/" + symbol.ToLower() + ".csv";
-            foreach (var line in File.ReadAllLines(format))
+            string path = Path.Combine(Constants.DataFolder, "equity", market, "factor_files", symbol.ToLower() + ".csv");
+            foreach (var line in File.ReadAllLines(path))
             {
                 var csv = line.Split(',');
                 yield return new FactorFileRow(
                     DateTime.ParseExact(csv[0], DateFormat.EightCharacter, CultureInfo.InvariantCulture, DateTimeStyles.None),
-                    decimal.Parse(csv[1]),
-                    decimal.Parse(csv[2])
+                    decimal.Parse(csv[1], CultureInfo.InvariantCulture),
+                    decimal.Parse(csv[2], CultureInfo.InvariantCulture)
                     );
             }
+        }
+
+        /// <summary>
+        /// Returns a string that represents the current object.
+        /// </summary>
+        /// <returns>
+        /// A string that represents the current object.
+        /// </returns>
+        /// <filterpriority>2</filterpriority>
+        public override string ToString()
+        {
+            return Date + ": " + PriceScaleFactor.ToString("0.0000");
         }
     }
 }

@@ -225,22 +225,22 @@ namespace QuantConnect.Data.Market
             {
                 // hourly and daily have different time format, and can use slow, robust c# parser.
                 tradeBar.Time = DateTime.ParseExact(csv[0], DateFormat.TwelveCharacter, CultureInfo.InvariantCulture);
-                tradeBar.Open = config.GetNormalizedPrice(Convert.ToDecimal(csv[1])/_scaleFactor);
-                tradeBar.High = config.GetNormalizedPrice(Convert.ToDecimal(csv[2])/_scaleFactor);
-                tradeBar.Low = config.GetNormalizedPrice(Convert.ToDecimal(csv[3])/_scaleFactor);
-                tradeBar.Close = config.GetNormalizedPrice(Convert.ToDecimal(csv[4])/_scaleFactor);
+                tradeBar.Open = config.GetNormalizedPrice(Convert.ToDecimal(csv[1], CultureInfo.InvariantCulture) / _scaleFactor);
+                tradeBar.High = config.GetNormalizedPrice(Convert.ToDecimal(csv[2], CultureInfo.InvariantCulture) / _scaleFactor);
+                tradeBar.Low = config.GetNormalizedPrice(Convert.ToDecimal(csv[3], CultureInfo.InvariantCulture) / _scaleFactor);
+                tradeBar.Close = config.GetNormalizedPrice(Convert.ToDecimal(csv[4], CultureInfo.InvariantCulture) / _scaleFactor);
             }
             else
             {
                 // Using custom "ToDecimal" conversion for speed on high resolution data.
-                tradeBar.Time = date.Date.AddMilliseconds(Convert.ToInt32(csv[0]));
+                tradeBar.Time = date.Date.AddMilliseconds(csv[0].ToInt32());
                 tradeBar.Open = config.GetNormalizedPrice(csv[1].ToDecimal()/_scaleFactor);
                 tradeBar.High = config.GetNormalizedPrice(csv[2].ToDecimal()/_scaleFactor);
                 tradeBar.Low = config.GetNormalizedPrice(csv[3].ToDecimal()/_scaleFactor);
                 tradeBar.Close = config.GetNormalizedPrice(csv[4].ToDecimal()/_scaleFactor);
             }
 
-            tradeBar.Volume = Convert.ToInt64(csv[5]);
+            tradeBar.Volume = csv[5].ToInt64();
             return tradeBar;
         }
 
@@ -266,15 +266,15 @@ namespace QuantConnect.Data.Market
             {
                 // hourly and daily have different time format, and can use slow, robust c# parser.
                 tradeBar.Time = DateTime.ParseExact(csv[0], DateFormat.TwelveCharacter, CultureInfo.InvariantCulture);
-                tradeBar.Open = Convert.ToDecimal(csv[1]);
-                tradeBar.High = Convert.ToDecimal(csv[2]);
-                tradeBar.Low = Convert.ToDecimal(csv[3]);
-                tradeBar.Close = Convert.ToDecimal(csv[4]);
+                tradeBar.Open = Convert.ToDecimal(csv[1], CultureInfo.InvariantCulture);
+                tradeBar.High = Convert.ToDecimal(csv[2], CultureInfo.InvariantCulture);
+                tradeBar.Low = Convert.ToDecimal(csv[3], CultureInfo.InvariantCulture);
+                tradeBar.Close = Convert.ToDecimal(csv[4], CultureInfo.InvariantCulture);
             }
             else
             {
                 //Fast decimal conversion
-                tradeBar.Time = date.Date.AddMilliseconds(Convert.ToInt32(csv[0]));
+                tradeBar.Time = date.Date.AddMilliseconds(csv[0].ToInt32());
                 tradeBar.Open = csv[1].ToDecimal();
                 tradeBar.High = csv[2].ToDecimal();
                 tradeBar.Low = csv[3].ToDecimal();
@@ -338,7 +338,7 @@ namespace QuantConnect.Data.Market
 
             var source = Path.Combine(Constants.DataFolder, securityTypePath, market, resolutionPath, symbolPath, filename);
 
-            return new SubscriptionDataSource(source, SubscriptionTransportMedium.LocalFile);
+            return new SubscriptionDataSource(source, SubscriptionTransportMedium.LocalFile, FileFormat.Csv);
         }
 
         public override BaseData Clone()

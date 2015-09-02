@@ -317,10 +317,11 @@ namespace QuantConnect.Securities
                 // ASUR  | | |      [order]        | | | | | | |
                 //  SPY  | | | | | | | | | | | | | | | | | | | |
                 var currentBar = asset.GetLastData();
-                if (order.Time >= currentBar.EndTime) return fill;
+                var localOrderTime = order.Time.ConvertFromUtc(asset.Exchange.TimeZone);
+                if (currentBar == null || localOrderTime >= currentBar.EndTime) return fill;
 
                 // if the MOO was submitted during market the previous day, wait for a day to turn over
-                if (asset.Exchange.DateTimeIsOpen(order.Time) && order.Time.Date == asset.Time.Date)
+                if (asset.Exchange.DateTimeIsOpen(localOrderTime) && localOrderTime.Date == asset.LocalTime.Date)
                 {
                     return fill;
                 }
@@ -373,8 +374,11 @@ namespace QuantConnect.Securities
 
             try
             {
-                // wait until market closes
-                if (asset.Exchange.ExchangeOpen)
+                var localOrderTime = order.Time.ConvertFromUtc(asset.Exchange.TimeZone);
+                var nextMarketClose = asset.Exchange.Hours.GetNextMarketClose(localOrderTime, false);
+                
+                // wait until market closes after the order time 
+                if (asset.LocalTime < nextMarketClose)
                 {
                     return fill;
                 }
@@ -441,7 +445,8 @@ namespace QuantConnect.Securities
                 return 0m;
             }
 
-            return GetOrderFee(order.Quantity, order.Value/order.Quantity);
+            var price = order.Status.IsFill() ? order.Price : security.Price;
+            return GetOrderFee(order.Quantity, order.GetValue(price) / order.Quantity);
         }
 
         /// <summary>
@@ -472,7 +477,7 @@ namespace QuantConnect.Securities
         /// </summary>
         private static bool IsExchangeOpen(Security asset)
         {
-            if (!asset.Exchange.DateTimeIsOpen(asset.Time))
+            if (!asset.Exchange.DateTimeIsOpen(asset.LocalTime))
             {
                 // if we're not open at the current time exactly, check the bar size, this handle large sized bars (hours/days)
                 var currentBar = asset.GetLastData();
